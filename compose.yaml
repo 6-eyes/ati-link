@@ -1,0 +1,30 @@
+# default network
+services:
+  server:
+    build:
+      no_cache: true
+      context: ./
+      dockerfile: ./server/Dockerfile
+    develop:
+      watch:
+        - action: restart
+          path: ./compose.yaml
+        - action: rebuild
+          path: ./server/Dockerfile
+    ports:
+      - "9099:9099"
+  client:
+    build:
+      no_cache: true
+      context: ./
+      dockerfile: ./client/Dockerfile
+    ports:
+      - "9100:9100"
+    depends_on:
+      - server
+    develop:
+      watch:
+        - action: restart
+          path: ./compose.yaml
+        - action: rebuild
+          path: ./client/Dockerfile
