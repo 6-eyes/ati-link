@@ -1,132 +1,208 @@
 pub mod checksum;
 pub mod compression;
+pub mod error;
+pub mod connection;
 
-use std::{io::Read, net::AddrParseError, sync::LazyLock};
-
+use std::sync::LazyLock;
 use rand::{rngs::OsRng, RngCore};
 
-static EOF_MARKER: LazyLock<[u8; CHUNK]> = LazyLock::new(generate_eof_marker);
-pub const CHUNK: usize = 16 * 1024;
+pub static EOF_MARKER: LazyLock<[u8; CHUNK]> = LazyLock::new(generate_eof_marker);
+pub const CHUNK: usize = 10;
 
 fn generate_eof_marker() -> [u8; CHUNK] {
+    println!("GENERATING MARKER");
     let mut rng = OsRng;
     let mut marker = [0u8; CHUNK];
     rng.fill_bytes(&mut marker);
     marker
 }
 
-/// Metadata sent before the initiation of file transfer
-#[derive(Default, Debug)]
-pub struct Metadata {
-    pub path: std::path::PathBuf,
-    pub eof_marker: Vec<u8>,
+/// Metadata to be sent at the start of each file
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct FileMetadata {
+    pub rel_path: std::path::PathBuf,
 }
 
-const DELIMITER: char = '^';
-
-impl Metadata {
-    pub fn new(path: std::path::PathBuf, name: &str) -> Self {
+impl FileMetadata {
+    pub fn new(path: &std::path::Path) -> Self {
         Self {
-            path: path.join(name),
+            rel_path: path.to_path_buf(),
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        bincode::deserialize(bytes).unwrap()
+    }
+}
+
+/// Metadata sent before the initiation of file transfer
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct UploadMetadata {
+    pub count: u32,
+    pub destination: std::path::PathBuf,
+    pub eof_marker: Vec<u8>,
+    pub compression: Option<Compression>,
+    pub checksum: Option<Checksum>,
+}
+
+impl UploadMetadata {
+    pub fn new(count: u32, destination: &std::path::Path) -> Self {
+        Self {
+            count,
+            destination: destination.to_path_buf(),
             eof_marker: EOF_MARKER.to_vec(),
+            compression: None,
+            checksum: None,
         }
     }
 
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut result = String::new();
-
-        result.push_str("path?");
-        result.push_str(&self.path.to_string_lossy());
-        result.push(DELIMITER);
-
-        result.push_str("eof_marker?");
-        let str = self.eof_marker.iter().map(|b| b.to_string()).collect::<Vec<String>>().join(",");
-        result.push_str(&str);
-
-        result.into_bytes()
-    }
-
-    pub fn deserialize(mut bytes: &[u8]) -> Result<Self, Error> {
-        let mut s = String::new();
-        bytes.read_to_string(&mut s)?;
-
-        let split = s.split(DELIMITER);
-
-        let mut metadata = Metadata::default();
-        for kv_pair in split {
-            let (k, v) = kv_pair.split_once('?').unwrap();
-            match k {
-                "path" => metadata.path = std::path::PathBuf::from(v),
-                "eof_marker" => metadata.eof_marker = v.split(',').map(|s| s.parse::<u8>().unwrap()).collect(),
-                _ => return Err(Error::Deserialize),
-            }
+    pub fn with_compression(self, compression: Option<Compression>) -> Self {
+        Self {
+            compression,
+            ..self
         }
+    }
 
-        Ok(metadata)
+    pub fn with_checksum(self, checksum: Option<Checksum>) -> Self {
+        Self {
+            checksum,
+            ..self
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        bincode::deserialize(bytes).unwrap()
     }
 }
 
-
-#[derive(Debug)]
-pub enum Error {
-    InvalidAddress,
-    InvalidArgument(String),
-    IO(std::io::Error),
-    Deserialize,
-    ConnectionFailed,
+/// Metadata sent by client for receiving data
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct DownloadMetadata {
+    pub destination: std::path::PathBuf,
+    pub compression: Option<Compression>,
+    pub checksum: Option<Checksum>,
 }
 
-impl std::error::Error for Error {}
+impl DownloadMetadata {
+    pub fn new(destination: &std::path::Path) -> Self {
+        Self {
+            destination: destination.to_path_buf(),
+            compression: None,
+            checksum: None,
+        }
+    }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    pub fn with_compression(self, compression: Option<Compression>) -> Self {
+        Self {
+            compression,
+            ..self
+        }
+    }
+
+    pub fn with_checksum(self, checksum: Option<Checksum>) -> Self {
+        Self {
+            checksum,
+            ..self
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        bincode::deserialize(bytes).unwrap()
+    }
+}
+
+/// Result send by server before initializing file transfer
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub enum Result {
+    Marker {
+        count: u32,
+        marker: Vec<u8>,
+    },
+    Err(String),
+}
+
+impl Result {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        bincode::deserialize(bytes).unwrap()
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub enum Compression {
+    Zlib,
+    GZip,
+}
+
+impl Compression {
+    pub fn get_algo(&self) -> Box<dyn compression::Compression> {
         match self {
-            Self::InvalidAddress => write!(f, "invalid address input"),
-            Self::InvalidArgument(s) => write!(f, "{}", s),
-            Self::IO(e) => write!(f, "io error {e}"),
-            Self::Deserialize => write!(f, "unable to parse string"),
-            Self::ConnectionFailed => write!(f, "unable to connect"),
+            Self::GZip => Box::new(compression::GZip),
+            Self::Zlib => Box::new(compression::Zlib),
         }
     }
 }
 
-impl From<AddrParseError> for Error {
-    fn from(value: AddrParseError) -> Self {
-        eprintln!("{value}");
-        Self::InvalidAddress
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub enum Checksum {
+    Sha256,
+    Md5,
+}
+
+impl Checksum {
+    pub fn get_algo(&self) -> Box<dyn checksum::Checksum> {
+        match self {
+            Self::Sha256 => Box::new(checksum::Sha256),
+            Self::Md5 => Box::new(checksum::Md5),
+        }
     }
 }
 
-impl From<std::num::ParseIntError> for Error {
-    fn from(_value: std::num::ParseIntError) -> Self {
-        Self::Deserialize
+/// The role assigned to the server
+#[derive(Debug, serde::Serialize, serde::Deserialize, Copy, Clone)]
+pub enum Role {
+    Source,
+    Sink,
+}
+
+impl Role {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        bincode::deserialize(bytes).unwrap()
     }
 }
 
-impl From<std::io::Error> for Error {
-    fn from(value: std::io::Error) -> Self {
-        Self::IO(value)
+/// method to recursively get all the files in the directory tree
+pub fn get_recursive_paths(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    let metadata = std::fs::symlink_metadata(path).unwrap();
+    if metadata.is_file() {
+        files.push(std::path::PathBuf::from(path));
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Metadata, EOF_MARKER};
-
-    #[test]
-    fn serialization_and_deserialization_of_metadata() {
-        let path = "server/src/lib.rs";
-        let name = "name";
-        let metadata = Metadata::new(std::path::PathBuf::from(path), name);
-
-        let serialized = metadata.serialize();
-        let deserialized = Metadata::deserialize(&serialized);
-
-        assert!(deserialized.is_ok());
-
-        let metadata = deserialized.unwrap();
-        assert!(metadata.path.to_str().is_some());
-
-        assert!(metadata.path.to_str().unwrap() == format!("{path}/{name}") && metadata.eof_marker == EOF_MARKER.clone());
+    else if metadata.is_dir() {
+        for file in std::fs::read_dir(path).unwrap() {
+            let path = file.unwrap().path();
+            files.extend(get_recursive_paths(&path));
+        }
     }
+
+    files
 }

@@ -1,0 +1,5 @@
+[settings]
+# compression = "GZip"
+checksum = "Sha256"
+chunk-bytes = 16000
+write-timeout-sec = 100
