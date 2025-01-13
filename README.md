@@ -1,4 +1,4 @@
-[diag](./design/query.png)
+[diag](./design/expected.png)
 
 # AtiLink
 - A command line utility and a daemon server to facilitate file transfer.
