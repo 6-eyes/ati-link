@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use rand::{rngs::OsRng, RngCore};
 
 pub static EOF_MARKER: LazyLock<[u8; CHUNK]> = LazyLock::new(generate_eof_marker);
-pub const CHUNK: usize = 10;
+pub const CHUNK: usize = 1 * 1000 * 1000; // 1mb
 
 fn generate_eof_marker() -> [u8; CHUNK] {
     println!("GENERATING MARKER");

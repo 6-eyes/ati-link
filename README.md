@@ -22,8 +22,8 @@ Open the [design](./design/atilink-design.excalidraw) file in [excalidraw.com](h
 
 ### Testing
 - All integration tests are performed in release mode.
-- `atilink --source 127.0.0.1:9099@/home/user/Downloads/Programming Assignment - RSE.pdf --destination client/data`
-- `atilink --source server/data/Programming Assignment - RSE.pdf --destination 127.0.0.1:9099@/home/user/Downloads/data`
+- `client --source 127.0.0.1:9099@/home/user/Downloads/Programming Assignment - RSE.pdf --destination client/data`
+- `client --source server/data/Programming Assignment - RSE.pdf --destination 127.0.0.1:9099@/home/user/Downloads/data`
 - Bare minimum unit tests are jotted in the same code files. These can be executed by running `cargo test` from project root.
 - To test using binaries:
 	- Clone the project.
@@ -35,7 +35,7 @@ Open the [design](./design/atilink-design.excalidraw) file in [excalidraw.com](h
 ### Configuration
 - Configurations provided as arguments takes precedence over those defined in file.
 #### Command Line
-##### Server
+##### Client
 - `--source` or `-s` to define the source of files. Only one path can denote source.
 - `--destination` or `-d` to define the file destination. Only one path can denote destination.
 - Remote path should be relative to the server binary.
@@ -49,12 +49,23 @@ Open the [design](./design/atilink-design.excalidraw) file in [excalidraw.com](h
 > Make sure that the remote paths are ABSOLUTE to the server binary rather than relative.
 
 
-##### Client
+##### Server
 - `-p` or `--port` is used define the port the server will listen to. By default this is configured to `[::1]:9099`.
 - `-d` or `--debug` is used to run the server in debug mode.
 
 #### File
-- Configuration can be defined in the file `config.toml`.
+- Configuration can be defined in the file `atilink-conf.toml`.
+```bash
+[settings]
+compression = "GZip"
+checksum = "Sha256"
+chunk-bytes = 16000
+write-timeout-sec = 100
+```
+- The values of **compression** can be `GZip` or `Zlib`.
+- By default no **compression** is used. This can be achieved by commenting out `compression`.
+- The values of **checksum** can be `Sha256` or `Md5`.
+- By default no **checksum** is used. This can be achieved by commenting out `checksum`.
 
 ### Edge Cases
 - The file source paths not containing socket addresses should exist on localhost.
@@ -79,6 +90,10 @@ Open the [design](./design/atilink-design.excalidraw) file in [excalidraw.com](h
 - Enabling **compression** leads to addition of bytes to the start of each chunk since each chunk possess different length after encoding.
 - `Base64` encoding is not required since not text based interpretation happens at any point.
 - File transfer metadata take place beforehand to decide upon the compression algorithms to incorporate.
+
+- To introduce new **compression** algorithm, your type should implement `Compression` trait.
+- To introduce new **checksum** algorithm, your type should implement `Checksum` trait.
+
 ### Server
 - A daemon process constantly listening to `9099` port. Port can be configured by `-p` or `--port` as cli arguments.
 - Any transfer is initialized by a `Role` sent by client. This decides whether the server acts as a `Source` or as a `Sink`.
