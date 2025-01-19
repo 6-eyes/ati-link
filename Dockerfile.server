@@ -1,0 +1,17 @@
+FROM rust:alpine as builder
+
+WORKDIR /usr/src/atilink
+RUN USER=root
+RUN apk add pkgconfig openssl-dev libc-dev
+COPY ./commons ./commons
+COPY ./server ./server
+RUN cargo build --release --manifest-path commons/Cargo.toml
+RUN cargo build --release --manifest-path server/Cargo.toml
+
+FROM alpine:latest
+RUN apk update
+
+COPY --from=builder /usr/src/atilink/server/target/release/server /usr/local/bin/
+
+ENTRYPOINT ["/usr/local/bin/server", "-p", "[::0]:9099"]
+EXPOSE 9099

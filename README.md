@@ -20,7 +20,7 @@ Open the [design](./design/atilink-design.excalidraw) file in [excalidraw.com](h
 - [ ] Make remote path reading absolute instead of relative.
 
 
-### Testing
+## Testing
 - All integration tests are performed in release mode.
 - `client --source 127.0.0.1:9099@/home/user/Downloads/Programming Assignment - RSE.pdf --destination client/data`
 - `client --source server/data/Programming Assignment - RSE.pdf --destination 127.0.0.1:9099@/home/user/Downloads/data`
@@ -31,11 +31,43 @@ Open the [design](./design/atilink-design.excalidraw) file in [excalidraw.com](h
 	- Create binaries using command `cargo build --release`. Make sure to use the release flags to get production performance.
 	- Binaries are present on the path `target/release/`.
     - Check **command line** instructions.
+### Docker
+- To simulate real world network between two servers, we leverage two containers. One for atilink daemon (server), and one for client.
+- For test, store your server side files in `server/data/` and your client side files in `client/data/`. These will be mounted in the respective containers.
+- Create a common network for the containers to communicate
+```bash
 
-### Configuration
+```
+
+#### Server
+- Build the server using the following command
+```bash
+sudo docker build --network=host -t atilink-server:latest -f Dockerfile.server .
+```
+- Run the server using
+```bash
+sudo docker run --rm -v $(pwd)/server/data:/data -p 9099:9099 --name ati-server atilink-server:latest
+```
+- We mount the directory `server/data` so that any changes can be reflected on local storage.
+- To omit the logs, run the container in detached mode
+```bash
+sudo docker run --rm -d -v $(pwd)/server/data:/data -p 9099:9099 --name ati-server atilink-server:latest
+```
+
+#### Client
+- We can run client on the host itself.
+- To see the file transfer work and reflect within `server/data`, we will provide the destination within the `data` directory.
+```bash
+cargo r --release --bin client -- -s client/data/$(file_name) -d 127.0.0.1:9099@/data/path/to/destination/
+```
+
+> [!note]
+> The `data` directories within client and server are incorporated in `.gitignore`.
+
+## Configuration
 - Configurations provided as arguments takes precedence over those defined in file.
-#### Command Line
-##### Client
+### Command Line
+#### Client
 - `--source` or `-s` to define the source of files. Only one path can denote source.
 - `--destination` or `-d` to define the file destination. Only one path can denote destination.
 - Remote path should be relative to the server binary.
@@ -49,7 +81,7 @@ Open the [design](./design/atilink-design.excalidraw) file in [excalidraw.com](h
 > Make sure that the remote paths are ABSOLUTE to the server binary rather than relative.
 
 
-##### Server
+#### Server
 - `-p` or `--port` is used define the port the server will listen to. By default this is configured to `[::1]:9099`.
 - `-d` or `--debug` is used to run the server in debug mode.
 
@@ -67,7 +99,7 @@ write-timeout-sec = 100
 - The values of **checksum** can be `Sha256` or `Md5`.
 - By default no **checksum** is used. This can be achieved by commenting out `checksum`.
 
-### Edge Cases
+## Edge Cases
 - The file source paths not containing socket addresses should exist on localhost.
 - If a directory path is provided as a source, it should get get all the paths of the contained files. (RECURSION)
 - Source path cannot be empty.
@@ -107,7 +139,7 @@ write-timeout-sec = 100
 - Smaller chunks are error prone. This is due to the reason that smaller chunks leads to huge read-write operations on stream. Any bit up-down can manipulate the length and disrupt the process. *Fix:* Increase the chunk size
 - While uploading data we have absolute path. While downloading we have relative path.
 
-### Stats
+## Stats
 - Client OS: Arch Linux
 - Server OS: Arch Linux
 - Tests are performed in release mode. `cargo run --release`.
@@ -129,7 +161,7 @@ write-timeout-sec = 100
 | 13.    | 21Gb      | None        | Sha256   | 10b             | 71.960773039s  |
 | 14.    | 21Gb      | Zlib        | Sha256   | 1mb             | 648.733519664s |
 
-### Observations
+## Observations
 - No *Compression* and *Checksum* provides faster times at the cost of bytes transferred. This can be justified by the fact that individual chunks are not compressed and validated over and over again.
 - Compression increases the transfer time significantly.
 - Checksums doesn't affect the transfer times since these are of small fixed lengths (64 bytes).
